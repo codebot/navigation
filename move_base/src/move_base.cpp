@@ -61,6 +61,7 @@ namespace move_base {
     ros::NodeHandle nh;
 
     recovery_trigger_ = PLANNING_R;
+    base_controller_ok_ = true;
 
     //get some parameters that will be global to the move base node
     std::string global_planner, local_planner;
@@ -96,6 +97,7 @@ namespace move_base {
     //like nav_view and rviz
     ros::NodeHandle simple_nh("move_base_simple");
     goal_sub_ = simple_nh.subscribe<geometry_msgs::PoseStamped>("goal", 1, boost::bind(&MoveBase::goalCB, this, _1));
+    goal_sub_ = nh.subscribe<std_msgs::Bool>("base_controller_ok", 1, boost::bind(&MoveBase::baseControllerCB, this, _1));
 
     //we'll assume the radius of the robot to be consistent with what's specified for the costmaps
     private_nh.param("local_costmap/inscribed_radius", inscribed_radius_, 0.325);
@@ -266,6 +268,10 @@ namespace move_base {
     action_goal.goal.target_pose = *goal;
 
     action_goal_pub_.publish(action_goal);
+  }
+
+  void MoveBase::baseControllerCB(const std_msgs::Bool::ConstPtr& valid){
+    base_controller_ok_ = valid;
   }
 
   void MoveBase::clearCostmapWindows(double size_x, double size_y){
@@ -801,6 +807,25 @@ namespace move_base {
       return false;
     }
 
+    // Check whether the base controller has reported failure to execute a
+    // commanded velocity
+/*
+    if(!base_controller_ok_){
+      //ABORT and SHUTDOWN COSTMAPS
+      ROS_ERROR("Base controller reported a failure; aborting.");
+      resetState();
+
+      //disable the planner thread
+      boost::unique_lock<boost::mutex> lock(planner_mutex_);
+      lock.lock();
+      runPlanner_ = false;
+      lock.unlock();
+
+      as_->setAborted(move_base_msgs::MoveBaseResult(), "Base controller reported a failure.");
+      return true;
+    }
+*/
+
     //if we have a new plan then grab it and give it to the controller
     if(new_global_plan_){
       //make sure to set the new plan flag to false
@@ -1104,6 +1129,7 @@ namespace move_base {
     state_ = PLANNING;
     recovery_index_ = 0;
     recovery_trigger_ = PLANNING_R;
+    base_controller_ok_ = true;
     publishZeroVelocity();
 
     //if we shutdown our costmaps when we're deactivated... we'll do that now
