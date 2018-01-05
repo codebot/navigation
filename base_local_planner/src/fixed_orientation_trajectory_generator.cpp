@@ -35,7 +35,7 @@
  * Author: TKruse
  *********************************************************************/
 
-#include <base_local_planner/simple_trajectory_generator.h>
+#include <base_local_planner/fixed_orientation_trajectory_generator.h>
 
 #include <cmath>
 
