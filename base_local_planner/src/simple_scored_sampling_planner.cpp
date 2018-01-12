@@ -57,7 +57,7 @@ namespace base_local_planner {
       }
       double cost = score_function_p->scoreTrajectory(traj);
       if (cost < 0) {
-        ROS_DEBUG("Velocity %.3lf, %.3lf, %.3lf discarded by cost function  %d with cost: %f", traj.xv_, traj.yv_, traj.thetav_, gen_id, cost);
+        ROS_INFO("Velocity %.3lf, %.3lf, %.3lf discarded by cost function  %d with cost: %f", traj.xv_, traj.yv_, traj.thetav_, gen_id, cost);
         traj_cost = cost;
         break;
       }
@@ -103,6 +103,8 @@ namespace base_local_planner {
           continue;
         }
         loop_traj_cost = scoreTrajectory(loop_traj, best_traj_cost);
+        ROS_INFO("Score: %f %f %f : %f",
+          loop_traj.xv_, loop_traj.yv_, loop_traj.thetav_, loop_traj_cost);
         if (all_explored != NULL) {
           loop_traj.cost_ = loop_traj_cost;
           all_explored->push_back(loop_traj);

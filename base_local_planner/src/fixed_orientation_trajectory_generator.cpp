@@ -40,6 +40,8 @@
 #include <cmath>
 
 #include <base_local_planner/velocity_iterator.h>
+#include <angles/angles.h>
+#include <ros/console.h>
 
 namespace base_local_planner {
 
@@ -82,6 +84,13 @@ void FixedOrientationTrajectoryGenerator::initialise(
   double min_vel_y = limits->min_vel_y;
   double max_vel_y = limits->max_vel_y;
 
+  // TODO: expose these settings as runtime configuration
+  std::vector<std::pair<double, double> > theta_ranges;
+  theta_ranges.push_back(std::pair<double, double>(-M_PI/6.0, M_PI/6.0));
+  theta_ranges.push_back(std::pair<double, double>(M_PI/2.0, M_PI/2.0));
+  theta_ranges.push_back(std::pair<double, double>(5*M_PI/6.0, -5*M_PI/6.0));
+  theta_ranges.push_back(std::pair<double, double>(-M_PI/2.0, -M_PI/2.0));
+
   // if sampling number is zero in any dimension, we don't generate samples generically
   if (vsamples[0] * vsamples[1] * vsamples[2] > 0) {
     //compute the feasible velocity space based on the rate at which we run
@@ -114,7 +123,72 @@ void FixedOrientationTrajectoryGenerator::initialise(
       min_vel[2] = std::max(min_vel_th, vel[2] - acc_lim[2] * sim_period_);
     }
 
-    Eigen::Vector3f vel_samp = Eigen::Vector3f::Zero();
+    // Sample travel directions from within the given ranges
+    std::vector<double> theta_samples;
+    std::ostringstream theta_samples_str;
+
+    // Start with the straight-line direction to the goal
+    double goal_theta =
+      angles::normalize_angle(atan2(goal[1]-pos[1], goal[0]-pos[0]) - pos[2]);
+    bool goal_theta_valid = false;
+    for(std::vector<std::pair<double, double> >::const_iterator it = theta_ranges.begin();
+        it != theta_ranges.end();
+        ++it) {
+      // TODO: check and fix this math to cover all possible cases
+      double from_start = angles::shortest_angular_distance(it->first, goal_theta);
+      double to_end = angles::shortest_angular_distance(goal_theta, it->second);
+      if (from_start >= 0.0 && to_end >= 0.0) {
+        goal_theta_valid = true;
+        break;
+      }
+    }
+    ROS_INFO("goal_theta: %f (%d)", goal_theta, goal_theta_valid);
+    if (goal_theta_valid) {
+      theta_samples.push_back(goal_theta);
+      theta_samples_str << goal_theta << " ";
+    }
+
+    if (goal_theta_valid) {
+      for(std::vector<std::pair<double, double> >::const_iterator it = theta_ranges.begin();
+          it != theta_ranges.end();
+          ++it) {
+        // TODO: make this sampling strategy smarter and configurable
+        theta_samples.push_back(it->first);
+        theta_samples_str << theta_samples.back() << " ";
+        double extent = angles::shortest_angular_distance(it->first, it->second);
+        if (extent > 0.0) {
+          theta_samples.push_back(angles::normalize_angle(it->first + extent/2.0));
+          theta_samples_str << theta_samples.back() << " ";
+          theta_samples.push_back(it->second);
+          theta_samples_str << theta_samples.back() << " ";
+        }
+      }
+    }
+    ROS_INFO("Theta samples: %s", theta_samples_str.str().c_str());
+
+    Eigen::Vector3f vel_samp;
+    // Create and store velocity samples from travel direction samples
+    for(std::vector<double>::const_iterator it = theta_samples.begin();
+        it != theta_samples.end();
+        ++it) {
+      // TODO: consider other magnitude velocities
+      vel_samp[0] = max_vel_x * cos(*it);
+      vel_samp[1] = max_vel_y * sin(*it);
+      vel_samp[2] = 0.0;
+      sample_params_.push_back(vel_samp);
+      ROS_INFO("Vel sample: %f %f", vel_samp[0], vel_samp[1]);
+    }
+
+    // Create and store velocity samples for in-place rotations
+    // TODO: consider other magnitude velocities
+    vel_samp[0] = 0.0;
+    vel_samp[1] = 0.0;
+    vel_samp[2] = min_vel[2];
+    sample_params_.push_back(vel_samp);
+    vel_samp[2] = max_vel[2];
+    sample_params_.push_back(vel_samp);
+
+    /*
     VelocityIterator x_it(min_vel[0], max_vel[0], vsamples[0]);
     VelocityIterator y_it(min_vel[1], max_vel[1], vsamples[1]);
     VelocityIterator th_it(min_vel[2], max_vel[2], vsamples[2]);
@@ -131,6 +205,7 @@ void FixedOrientationTrajectoryGenerator::initialise(
       }
       y_it.reset();
     }
+    */
   }
 }
 
@@ -192,10 +267,12 @@ bool FixedOrientationTrajectoryGenerator::generateTrajectory(
   // the required minimum velocities for translation and rotation (if set)
   if ((limits_->min_trans_vel >= 0 && vmag + eps < limits_->min_trans_vel) &&
       (limits_->min_rot_vel >= 0 && fabs(sample_target_vel[2]) + eps < limits_->min_rot_vel)) {
+    ROS_INFO("Bailing because of too-low vel: %f %f %f", sample_target_vel[0], sample_target_vel[1], sample_target_vel[2]);
     return false;
   }
   // make sure we do not exceed max diagonal (x+y) translational velocity (if set)
   if (limits_->max_trans_vel >=0 && vmag - eps > limits_->max_trans_vel) {
+    ROS_INFO("Bailing because of too-high diag vel: %f %f %f", sample_target_vel[0], sample_target_vel[1], sample_target_vel[2]);
     return false;
   }
 
